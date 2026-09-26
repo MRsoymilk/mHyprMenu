@@ -100,3 +100,7 @@ Use Super + RMB rather than bare RMB so application context menus keep working.
 ## Waybar
 
 A Waybar custom module can execute `mhyprmenu` from its click action.
+
+## License
+
+mHyprMenu is licensed under the [MIT License](LICENSE).
