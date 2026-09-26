@@ -1,0 +1,29 @@
+[menu]
+width = 240
+item_height = 32
+padding_x = 12
+
+[font]
+family = "sans-serif"
+size = 14
+
+[colors]
+background = "#252525FF"
+border = "#626262FF"
+hover = "#3B4252FF"
+text = "#EEEEEEFF"
+dim = "#BEBEBEFF"
+separator = "#626262FF"
+
+[border]
+width = 1
+
+[separator]
+inset = 8
+width = 1
+
+[indicator]
+symbol = "›"
+width = 20
+right_padding = 8
+size_delta = 2
