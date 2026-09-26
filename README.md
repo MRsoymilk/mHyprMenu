@@ -2,6 +2,8 @@
 
 A small native Wayland cascading context menu for Hyprland.
 
+![mHyprMenu](README/mHyprMenu.jpg)
+
 ## Design
 
 - Rust only application code
