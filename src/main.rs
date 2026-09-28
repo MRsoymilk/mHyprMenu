@@ -48,6 +48,7 @@ use crate::{
 fn main() -> Result<()> {
     match env::args().nth(1).as_deref() {
         Some("--daemon") => run_daemon(),
+        Some("--oneshot") => run_wayland(None, false),
         Some("--reload") => ipc::send(Request::Reload),
         Some("--status") => {
             print!("{}", ipc::request_status()?);
@@ -81,6 +82,7 @@ fn print_help() {
          \n\
          Usage:\n\
            mhyprmenu           show the menu via daemon, or fall back to one-shot mode\n\
+           mhyprmenu --oneshot force one-shot mode (uses MHYPRMENU_CONFIG_DIR when set)\n\
            mhyprmenu --daemon  run the persistent Wayland daemon\n\
            mhyprmenu --reload  reload daemon configuration\n\
            mhyprmenu --status  show last popup timing\n\

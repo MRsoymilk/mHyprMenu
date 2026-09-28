@@ -46,6 +46,10 @@ impl Config {
 }
 
 pub fn config_dir() -> Result<PathBuf> {
+    if let Some(dir) = env::var_os("MHYPRMENU_CONFIG_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
+
     if let Some(dir) = env::var_os("XDG_CONFIG_HOME") {
         return Ok(PathBuf::from(dir).join("mhyprmenu"));
     }

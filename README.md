@@ -59,6 +59,16 @@ $XDG_RUNTIME_DIR/mhyprmenu.sock
 
 If no daemon is running, a normal `mhyprmenu` invocation falls back to one-shot mode.
 
+For dynamic callers such as mHyprBar's tray DBusMenu bridge, force an isolated one-shot instance:
+
+```bash
+MHYPRMENU_CONFIG_DIR=/run/user/1000/example-menu mhyprmenu --oneshot
+```
+
+`MHYPRMENU_CONFIG_DIR` points directly at a directory containing `config.toml` and
+`style.toml`. Forced one-shot mode does not forward the request to a running daemon, so temporary
+menus can use their own generated item list without replacing the daemon's normal configuration.
+
 ## Config and style
 
 Both files are required at runtime:
