@@ -46,28 +46,47 @@ use crate::{
 };
 
 fn main() -> Result<()> {
-    match env::args().nth(1).as_deref() {
-        Some("--daemon") => run_daemon(),
-        Some("--oneshot") => run_wayland(None, false),
-        Some("--reload") => ipc::send(Request::Reload),
-        Some("--status") => {
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    match args.first().map(String::as_str) {
+        Some("--daemon") if args.len() == 1 => run_daemon(),
+        Some("--oneshot") if args.len() == 1 => run_wayland(None, false, None),
+        Some("--popup-at") if args.len() == 3 => {
+            let x = parse_coordinate(&args[1], "x")?;
+            let y = parse_coordinate(&args[2], "y")?;
+            let request = Request::PopupAt { x, y };
+            if ipc::send(request.clone()).is_ok() {
+                Ok(())
+            } else {
+                run_wayland(None, false, Some((x, y)))
+            }
+        }
+        Some("--reload") if args.len() == 1 => ipc::send(Request::Reload),
+        Some("--status") if args.len() == 1 => {
             print!("{}", ipc::request_status()?);
             Ok(())
         }
-        Some("--quit") => ipc::send(Request::Quit),
-        Some("-h" | "--help") => {
+        Some("--quit") if args.len() == 1 => ipc::send(Request::Quit),
+        Some("-h" | "--help") if args.len() == 1 => {
             print_help();
             Ok(())
         }
-        Some(argument) => bail!("unknown argument: {argument}"),
+        Some(argument) => bail!("unknown or invalid arguments starting with: {argument}"),
         None => {
             if ipc::send(Request::Popup).is_ok() {
                 Ok(())
             } else {
-                run_wayland(None, false)
+                run_wayland(None, false, None)
             }
         }
     }
+}
+
+fn parse_coordinate(value: &str, name: &str) -> Result<f64> {
+    let parsed = value
+        .parse::<f64>()
+        .with_context(|| format!("invalid {name} coordinate: {value:?}"))?;
+    anyhow::ensure!(parsed.is_finite(), "{name} coordinate must be finite");
+    Ok(parsed)
 }
 
 fn format_timing(value: Option<u128>) -> String {
@@ -81,9 +100,10 @@ fn print_help() {
         "mhyprmenu\n\
          \n\
          Usage:\n\
-           mhyprmenu           show the menu via daemon, or fall back to one-shot mode\n\
-           mhyprmenu --oneshot force one-shot mode (uses MHYPRMENU_CONFIG_DIR when set)\n\
-           mhyprmenu --daemon  run the persistent Wayland daemon\n\
+           mhyprmenu                 show the menu via daemon, or fall back to one-shot mode\n\
+           mhyprmenu --popup-at X Y  show at explicit monitor-local coordinates\n\
+           mhyprmenu --oneshot       force one-shot mode (uses MHYPRMENU_CONFIG_DIR when set)\n\
+           mhyprmenu --daemon        run the persistent Wayland daemon\n\
            mhyprmenu --reload  reload daemon configuration\n\
            mhyprmenu --status  show last popup timing\n\
            mhyprmenu --quit    stop the daemon"
@@ -92,10 +112,14 @@ fn print_help() {
 
 fn run_daemon() -> Result<()> {
     let (listener, _socket_guard) = ipc::bind_listener()?;
-    run_wayland(Some(listener), true)
+    run_wayland(Some(listener), true, None)
 }
 
-fn run_wayland(listener: Option<UnixListener>, daemon_mode: bool) -> Result<()> {
+fn run_wayland(
+    listener: Option<UnixListener>,
+    daemon_mode: bool,
+    initial_origin: Option<(f64, f64)>,
+) -> Result<()> {
     let config = Config::load()?;
     let style = Style::load()?;
 
@@ -151,8 +175,15 @@ fn run_wayland(listener: Option<UnixListener>, daemon_mode: bool) -> Result<()> 
                         match listener.as_ref().accept() {
                             Ok((mut stream, _)) => match ipc::read_request(&mut stream) {
                                 Ok(Some(Request::Popup)) => {
-                                    if let Err(error) = app.show(&popup_qh) {
+                                    if let Err(error) = app.show(&popup_qh, None) {
                                         eprintln!("mhyprmenu: failed to show menu: {error:#}");
+                                    }
+                                }
+                                Ok(Some(Request::PopupAt { x, y })) => {
+                                    if let Err(error) = app.show(&popup_qh, Some((x, y))) {
+                                        eprintln!(
+                                            "mhyprmenu: failed to show positioned menu: {error:#}"
+                                        );
                                     }
                                 }
                                 Ok(Some(Request::Reload)) => {
@@ -188,7 +219,7 @@ fn run_wayland(listener: Option<UnixListener>, daemon_mode: bool) -> Result<()> 
             )
             .context("failed to register daemon socket")?;
     } else {
-        app.show(&qh)?;
+        app.show(&qh, initial_origin)?;
     }
 
     while !app.exit {
@@ -225,7 +256,7 @@ struct App {
 }
 
 impl App {
-    fn show(&mut self, qh: &QueueHandle<Self>) -> Result<()> {
+    fn show(&mut self, qh: &QueueHandle<Self>, explicit_origin: Option<(f64, f64)>) -> Result<()> {
         if self.layer.is_some() {
             self.hide();
         }
@@ -239,15 +270,20 @@ impl App {
         self.pointer_ms = None;
         self.visible_ms = None;
 
-        match hyprland::cursor_position_local() {
-            Ok((x, y)) => {
-                self.menu.set_origin(x, y);
-                self.pointer_ms = self.elapsed_ms();
-            }
-            Err(error) => {
-                eprintln!(
-                    "mhyprmenu: failed to read cursor position, waiting for pointer event: {error:#}"
-                );
+        if let Some((x, y)) = explicit_origin {
+            self.menu.set_origin(x.max(0.0), y.max(0.0));
+            self.pointer_ms = self.elapsed_ms();
+        } else {
+            match hyprland::cursor_position_local() {
+                Ok((x, y)) => {
+                    self.menu.set_origin(x, y);
+                    self.pointer_ms = self.elapsed_ms();
+                }
+                Err(error) => {
+                    eprintln!(
+                        "mhyprmenu: failed to read cursor position, waiting for pointer event: {error:#}"
+                    );
+                }
             }
         }
 

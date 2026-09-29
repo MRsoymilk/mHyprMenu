@@ -10,30 +10,42 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Request {
     Popup,
+    PopupAt { x: f64, y: f64 },
     Reload,
     Status,
     Quit,
 }
 
 impl Request {
-    pub fn as_bytes(self) -> &'static [u8] {
+    pub fn encode(&self) -> Vec<u8> {
         match self {
-            Self::Popup => b"popup\n",
-            Self::Reload => b"reload\n",
-            Self::Status => b"status\n",
-            Self::Quit => b"quit\n",
+            Self::Popup => b"popup\n".to_vec(),
+            Self::PopupAt { x, y } => format!("popup-at {x:.3} {y:.3}\n").into_bytes(),
+            Self::Reload => b"reload\n".to_vec(),
+            Self::Status => b"status\n".to_vec(),
+            Self::Quit => b"quit\n".to_vec(),
         }
     }
 
     pub fn parse(bytes: &[u8]) -> Option<Self> {
-        match std::str::from_utf8(bytes).ok()?.trim() {
-            "popup" => Some(Self::Popup),
-            "reload" => Some(Self::Reload),
-            "status" => Some(Self::Status),
-            "quit" => Some(Self::Quit),
+        let text = std::str::from_utf8(bytes).ok()?.trim();
+        let mut fields = text.split_whitespace();
+        match fields.next()? {
+            "popup" if fields.next().is_none() => Some(Self::Popup),
+            "popup-at" => {
+                let x = fields.next()?.parse::<f64>().ok()?;
+                let y = fields.next()?.parse::<f64>().ok()?;
+                if fields.next().is_some() || !x.is_finite() || !y.is_finite() {
+                    return None;
+                }
+                Some(Self::PopupAt { x, y })
+            }
+            "reload" if fields.next().is_none() => Some(Self::Reload),
+            "status" if fields.next().is_none() => Some(Self::Status),
+            "quit" if fields.next().is_none() => Some(Self::Quit),
             _ => None,
         }
     }
@@ -49,7 +61,7 @@ pub fn send(request: Request) -> Result<()> {
     let mut stream = UnixStream::connect(&path)
         .with_context(|| format!("failed to connect to {}", path.display()))?;
     stream
-        .write_all(request.as_bytes())
+        .write_all(&request.encode())
         .with_context(|| format!("failed to write to {}", path.display()))
 }
 
@@ -58,7 +70,7 @@ pub fn request_status() -> Result<String> {
     let mut stream = UnixStream::connect(&path)
         .with_context(|| format!("failed to connect to {}", path.display()))?;
     stream
-        .write_all(Request::Status.as_bytes())
+        .write_all(&Request::Status.encode())
         .with_context(|| format!("failed to write to {}", path.display()))?;
 
     let mut response = String::new();
@@ -103,6 +115,24 @@ pub fn read_request(stream: &mut UnixStream) -> Result<Option<Request>> {
         .read(&mut buffer)
         .context("failed to read daemon request")?;
     Ok(Request::parse(&buffer[..size]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Request;
+
+    #[test]
+    fn popup_at_round_trips() {
+        let request = Request::PopupAt { x: 42.5, y: 32.0 };
+        assert_eq!(Request::parse(&request.encode()), Some(request));
+    }
+
+    #[test]
+    fn rejects_invalid_popup_coordinates() {
+        assert_eq!(Request::parse(b"popup-at NaN 32\n"), None);
+        assert_eq!(Request::parse(b"popup-at 10\n"), None);
+        assert_eq!(Request::parse(b"popup-at 10 20 extra\n"), None);
+    }
 }
 
 pub struct SocketGuard(PathBuf);
